@@ -1,7 +1,13 @@
+# Autoencoder script but not for training just for using to encode and decode
+
+import anndata as ad
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+import numpy as np
 from typing import List, Optional, Callable
 import torch.nn as nn
 import torch.nn.functional as F
-import torch
+
 
 # -------------------------------
 # Define MLP (like the one in CFGEN)
@@ -37,7 +43,8 @@ class MLP(nn.Module):
     def forward(self, x):
         x = self.net(x)
         return x if self.final_activation is None else self.final_activation(x)
-    
+
+
 # -------------------------------
 # Negative Binomial log-likelihood
 # -------------------------------
@@ -46,6 +53,7 @@ def negative_binomial_log_likelihood(x, mu, theta, eps=1e-8):
     t2 = (theta * (torch.log(theta + eps) - torch.log(mu + theta + eps))) + \
          (x * (torch.log(mu + eps) - torch.log(mu + theta + eps)))
     return t1 + t2
+
 
 # -------------------------------
 # NB Autoencoder
@@ -57,19 +65,21 @@ class NB_Autoencoder(nn.Module):
                  hidden_dims: List[int] = [512, 256],
                  dropout_p: float = 0.1,
                  l2_reg: float = 1e-5,
-                 kl_reg: float = 1e-3):
+                 kl_reg: float = 0):
         super().__init__()
         self.num_features = num_features
         self.latent_dim = latent_dim
         self.l2_reg = l2_reg
         self.kl_reg = kl_reg
 
-        self.encoder = MLP(
-            dims=[num_features, *hidden_dims, latent_dim],
-            batch_norm=True,
-            dropout=True,
-            dropout_p=dropout_p
+        self.hidden_encoder = MLP(
+        dims=[num_features, *hidden_dims],
+        batch_norm=True,
+        dropout=True,
+        dropout_p=dropout_p
         )
+        self.latent_layer = nn.Linear(hidden_dims[-1], latent_dim)
+
 
         self.decoder = MLP(
             dims=[latent_dim, *hidden_dims[::-1], num_features],
@@ -81,10 +91,27 @@ class NB_Autoencoder(nn.Module):
         self.log_theta = nn.Parameter(torch.randn(num_features) * 0.01)
 
     def forward(self, x):
-        z = self.encoder(x)
-        mu = F.softplus(self.decoder(z))
+        h = self.hidden_encoder(x)
+        z = self.latent_layer(h)
+        # Raw decoded logits
+        logits = self.decoder(z)   # shape (batch, num_genes)
+        
+        # Softmax over genes → normalized probabilities
+        gene_probs = F.softmax(logits, dim=1)
+        
+        # Library size of each cell (sum of counts)
+        library_size = x.sum(dim=1, keepdim=True)  # shape (batch, 1)
+        
+        # Scale probabilities by library size → mean parameter μ
+        mu = gene_probs * library_size
+
         theta = torch.exp(self.log_theta).unsqueeze(0).expand_as(mu)
         return {"z": z, "mu": mu, "theta": theta}
+
+    def decode(self, z):
+        mu = F.softplus(self.decoder(z))
+        theta = torch.exp(self.log_theta).unsqueeze(0).expand_as(mu)
+        return {"mu": mu, "theta": theta}
 
     def loss_function(self, x, outputs):
         mu = outputs["mu"]
@@ -95,3 +122,12 @@ class NB_Autoencoder(nn.Module):
         kl_loss = (z**2).mean() * self.kl_reg
         loss = nll + l2_loss + kl_loss
         return {"loss": loss, "nll": nll, "l2": l2_loss, "kl": kl_loss}
+
+#Function to sample count data from generated distribution
+def sample_nb(mu, theta): 
+    # theta: inverse dispersion, expand if necessary 
+    theta = theta.expand_as(mu) 
+    gamma_dist = torch.distributions.Gamma(theta, theta / mu) 
+    poisson_rate = gamma_dist.sample() 
+    counts = torch.poisson(poisson_rate) 
+    return counts
