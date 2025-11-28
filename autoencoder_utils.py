@@ -147,10 +147,10 @@ class NB_Autoencoder(nn.Module):
         nll = -nb_dist.log_prob(x).sum(dim=1).mean()  # mean over batch
         
         # Optional regularization
-        #l2_loss = sum((p**2).sum() for p in self.parameters()) * self.l2_reg
-        #l_loss = (z**2).mean() * self.kl_reg
+        l2_loss = sum((p**2).sum() for p in self.parameters()) * self.l2_reg
+        kl_loss = (z**2).mean() * self.kl_reg
     
-        loss = nll #+ l2_loss + kl_loss
+        loss = nll + l2_loss + kl_loss
         return {"loss": loss, "nll": nll}
 
 # function to for dataloader 
