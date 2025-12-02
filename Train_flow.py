@@ -253,7 +253,7 @@ class ConditionalVectorFieldODE():
 
 # now we somehow want to model the marginal vector field from the conditonal vector field
 # for that we will use eulers:
-class EulerSimulator():
+class EulerSimulator2():
     def __init__(self, ode, z: torch.Tensor):
         self.ode = ode
         self.z = z
@@ -267,6 +267,26 @@ class EulerSimulator():
             z_exp = self.z
         dx = self.ode.drift_coefficient(xt, t, z_exp)
         return xt + dx * h
+        
+class EulerSimulator:
+    def __init__(self, ode, z, u_mean, u_std):
+        self.ode = ode
+        self.z = z
+        self.u_mean = u_mean
+        self.u_std = u_std
+
+    def step(self, x, t, dt):
+        # Batch-size match for conditioning
+        z_batch = self.z.expand(x.shape[0], -1)
+
+        # Forward pass through model
+        v_pred = self.ode(x, z_batch, t)  # <--- call model directly
+
+        # Un-normalize
+        v_pred_un = v_pred * self.u_std + self.u_mean
+
+        # Euler step
+        return x + dt * v_pred_un
 
 
 
@@ -277,15 +297,16 @@ import math
 import torch.nn as nn
 
 class TimeEmbedder(nn.Module):
-    def __init__(self, embed_dim=32, max_freq=1e4):
+    def __init__(self, embed_dim=64, max_freq=1e4):
         super().__init__()
         self.embed_dim = embed_dim
         self.max_freq = max_freq
         self.mlp = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim),
+            nn.Linear(embed_dim, embed_dim*2),
             nn.SiLU(),
-            nn.Linear(embed_dim, embed_dim),
-            nn.SiLU()
+            nn.Linear(embed_dim*2, embed_dim*2),
+            nn.SiLU(),
+            nn.Linear(embed_dim*2, embed_dim)
         )
 
     def forward(self, t):
@@ -293,30 +314,34 @@ class TimeEmbedder(nn.Module):
         args = t * freqs
         emb = torch.cat([torch.sin(args), torch.cos(args)], dim=-1)
         return self.mlp(emb)
-
 class ResNetBlock(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, dim, hidden_dim=None):
         super().__init__()
+        hidden_dim = hidden_dim or dim*2
         self.block = nn.Sequential(
-            nn.Linear(dim, dim),
+            nn.Linear(dim, hidden_dim),
             nn.SiLU(),
-            nn.Linear(dim, dim)
+            nn.Linear(hidden_dim, dim),
+            nn.LayerNorm(dim)
         )
 
     def forward(self, x):
         return x + self.block(x)
-
 class NeuralVectorField(nn.Module):
-    def __init__(self, latent_dim, hidden_dim=128, n_resblocks=3, time_embed_dim=32):
+    def __init__(self, latent_dim, hidden_dim=256, n_resblocks=5, time_embed_dim=64):
         super().__init__()
         self.x_proj = nn.Linear(latent_dim, hidden_dim)
         self.z_proj = nn.Linear(latent_dim, hidden_dim)
         self.time_embedder = TimeEmbedder(time_embed_dim)
 
         self.resblocks = nn.ModuleList([
-            ResNetBlock(hidden_dim*2 + time_embed_dim) for _ in range(n_resblocks)
+            ResNetBlock(hidden_dim*2 + time_embed_dim, hidden_dim*2) for _ in range(n_resblocks)
         ])
-        self.output_layer = nn.Linear(hidden_dim*2 + time_embed_dim, latent_dim)
+        self.output_layer = nn.Sequential(
+            nn.Linear(hidden_dim*2 + time_embed_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, latent_dim)
+        )
 
     def forward(self, x, z, t):
         xh = self.x_proj(x)
