@@ -1,0 +1,11 @@
+# Ignore PyTorch checkpoints
+*.pt
+
+# Ignore generated data
+*.h5ad
+
+# Ignore figures folder
+figures/
+
+# Ignore Python cache
+__pycache__/
