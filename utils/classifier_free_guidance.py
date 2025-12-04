@@ -7,7 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import anndata as ad
 import matplotlib.pyplot as plt
-from autoencoder_utils import NB_Autoencoder
 import scanpy as sc
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -118,64 +117,6 @@ class LearnedVectorFieldODE:
         # CFG Formula: v = v_uncond + s * (v_cond - v_uncond)
         return v_uncond + self.scale * (v_cond - v_uncond)
 
-def generate_full_dataset(n_per_type=200):
-    """
-    Generates samples for all cell types to create a full synthetic dataset.
-    """
-    vf_model.eval()
-    conditioner.eval()
-    
-    all_latents = []
-    all_lib_sizes = []
-    all_types = []
-    
-    print(f"Generating {n_per_type} cells per type for {len(unique_types)} types...")
-    for idx, ct in enumerate(unique_types):
-        # Conditions
-        type_tensor = torch.full((n_per_type,), idx, dtype=torch.long, device=device)
-        l_tensor = torch.normal(lib_mean.item(), lib_std.item(), (n_per_type, 1), device=device)
-        
-        # Initial Noise
-        x = torch.randn(n_per_type, latent_dim, device=device)
-        
-        # Integration
-        ode = LearnedVectorFieldODE(vf_model, conditioner, type_tensor, l_tensor, guidance_scale=10.0)
-        dt = 1.0 / n_steps
-        t = torch.zeros(n_per_type, 1, device=device)
-        
-        with torch.no_grad():
-            for _ in range(n_steps):
-                v = ode.drift(x, t)
-                x = x + v * dt
-                t = t + dt
-        
-        all_latents.append(x)
-        all_lib_sizes.append(l_tensor)
-        all_types.extend([ct] * n_per_type)
-        
-    gen_latents_tensor = torch.cat(all_latents, dim=0)
-    gen_libs_tensor = torch.cat(all_lib_sizes, dim=0)
-    
-    # Rescaling
-    mean_gen = gen_latents_tensor.mean(dim=0)
-    std_gen = gen_latents_tensor.std(dim=0)
-    mean_orig = latent_tensor.mean(dim=0)
-    std_orig = latent_tensor.std(dim=0)
-    
-    gen_rescaled = (gen_latents_tensor - mean_gen) / std_gen * std_orig + mean_orig
-    
-    # Decode to Counts
-    lib_counts = torch.exp(gen_libs_tensor) - 1
-    
-    print("Decoding full dataset...")
-    with torch.no_grad():
-        outputs = vae.decode(gen_rescaled, adata, lib_counts)
-        mu = outputs["mu"]
-        theta = torch.exp(outputs["theta"])
-        nb_dist = NegativeBinomial(mu=mu, theta=theta)
-        X_counts = nb_dist.sample().cpu().numpy()
-        
-    return X_counts, np.array(all_types)
 
 def plot_umap_scatter(ax, adata_subset, color_col, title, palette=None, s=10):
     sc.pl.umap(adata_subset, color=color_col, ax=ax, show=False, 
@@ -184,7 +125,7 @@ def plot_umap_scatter(ax, adata_subset, color_col, title, palette=None, s=10):
     ax.set_ylabel("UMAP2")
 
 
-def plot_overlap(ax, c_type):
+def plot_overlap(ax, c_type, adata_merged):
     mask_r = (adata_merged.obs['dataset'] == 'Real') & (adata_merged.obs['cell_type'] == c_type)
     mask_g = (adata_merged.obs['dataset'] == 'Generated') & (adata_merged.obs['cell_type'] == c_type)
     
@@ -197,3 +138,4 @@ def plot_overlap(ax, c_type):
     ax.set_title(c_type)
     ax.set_xticks([])
     ax.set_yticks([])
+
