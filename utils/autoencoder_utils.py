@@ -52,6 +52,30 @@ class MLP(nn.Module):
         x = self.net(x)
         return x if self.final_activation is None else self.final_activation(x)
 
+from scipy.stats import beta
+
+def size_factor_distribution(adata_train, n_samples):
+    # Parameters
+    """ Here we have a function that gets a distribution of the library size in the corresponding data set.
+    It then samples from this distribution, so we get a realistic distribution of library size in each decoded cell
+    """
+    min_val = adata_train.obs['n_counts'].min() 
+    max_val = adata_train.obs['n_counts'].max()
+    mean = adata_train.obs['n_counts'].mean()
+    std = adata_train.obs['n_counts'].std()
+    
+    # Beta distribution sampling
+    m = (mean - min_val) / (max_val - min_val)
+    v = (std**2) / ((max_val - min_val)**2)
+    temp = m*(1-m)/v - 1
+    a_beta = m * temp
+    b_beta = (1-m) * temp
+    
+    samples_beta = beta.rvs(a_beta, b_beta, size=n_samples)
+    samples_beta = samples_beta * (max_val - min_val) + min_val
+
+    return samples_beta
+
 # -------------------------------
 # NB Autoencoder
 # -------------------------------
@@ -90,7 +114,7 @@ class NB_Autoencoder(nn.Module):
 
         #self.log_theta = nn.Parameter(torch.randn(num_features) * 0.01)
         self.theta = torch.nn.Parameter(torch.randn(num_features), requires_grad=True)
-    def forward(self, x, library_size = None):
+    def forward(self, x, adata, library_size = None):
         """ forward function that encodes and decodes"""
         z = self.hidden_encoder(x["X_norm"])
         
@@ -146,7 +170,7 @@ class NB_Autoencoder(nn.Module):
 
     
         
-    def decode(self, z, library_size=None):
+    def decode(self, z,adata, library_size=None):
         """
         Decode latent vectors z to NB parameters mu, theta.
         z: (batch, latent_dim)
