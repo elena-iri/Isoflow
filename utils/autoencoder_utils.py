@@ -55,6 +55,8 @@ class MLP(nn.Module):
 # -------------------------------
 # NB Autoencoder
 # -------------------------------
+# Here we incorporate our MLP into a bigger class, so that we can train an autoencoder. We train it independetly of the 
+# flow matching model.
 class NB_Autoencoder(nn.Module):
     def __init__(self,
                  num_features: int,
@@ -88,19 +90,28 @@ class NB_Autoencoder(nn.Module):
 
         #self.log_theta = nn.Parameter(torch.randn(num_features) * 0.01)
         self.theta = torch.nn.Parameter(torch.randn(num_features), requires_grad=True)
-    def forward(self, x):
-        
+    def forward(self, x, library_size = None):
+        """ forward function that encodes and decodes"""
         z = self.hidden_encoder(x["X_norm"])
         
         #z = self.latent_layer(h)
         # Raw decoded logits
-        logits = self.decoder(z)   # shape (batch, num_genes)
+        logits = self.decoder(z)  
         
         # Softmax over genes → normalized probabilities
         gene_probs = F.softmax(logits, dim=1)
-        
+
+        if library_size is None:
+            # Use average library size 1.0 if not provided
+            # Sample size factors from your custom distribution
+            lib = size_factor_distribution(adata, z.size(0))   # returns numpy array or list
+
+            # Convert to torch tensor, match shape, move to correct device
+            library_size = torch.tensor(lib, dtype=torch.float32, device=z.device).unsqueeze(1)
+
+            #library_size = torch.ones(z.size(0), 1, device=z.device)
         # Library size of each cell (sum of counts)
-        library_size = x["X"].sum(1).unsqueeze(1).to(self.device)  # shape (batch, 1)
+        #library_size = x["X"].sum(1).unsqueeze(1).to(self.device)  
         
         # Scale probabilities by library size → mean parameter μ
         mu = gene_probs * library_size
@@ -110,11 +121,12 @@ class NB_Autoencoder(nn.Module):
         return {"z": z, "mu": mu, "theta": self.theta}
 
     def encode(self, x):
+        """ decoding function"""
         z = self.hidden_encoder(x)
         return z
-    
+
     def size_factor_distribution(self, adata_train, n_samples):
-        # Parameters
+        """ same function as in block before """
         min_val = adata_train.obs['n_counts'].min() 
         max_val = adata_train.obs['n_counts'].max()
         mean = adata_train.obs['n_counts'].mean()
@@ -131,8 +143,10 @@ class NB_Autoencoder(nn.Module):
         samples_beta = samples_beta * (max_val - min_val) + min_val
     
         return samples_beta
+
+    
         
-    def decode(self, z, adata, library_size=None):
+    def decode(self, z, library_size=None):
         """
         Decode latent vectors z to NB parameters mu, theta.
         z: (batch, latent_dim)
@@ -140,11 +154,10 @@ class NB_Autoencoder(nn.Module):
         """
         logits = self.decoder(z)  # (batch, num_genes)
         gene_probs = F.softmax(logits, dim=1)  # softmax over genes
-    
+        # if library size isnt specified:
         if library_size is None:
-            # Use average library size 1.0 if not provided
             # Sample size factors from your custom distribution
-            lib = self.size_factor_distribution(adata, z.size(0))   # returns numpy array or list
+            lib = size_factor_distribution(adata, z.size(0))   # returns numpy array or list
 
             # Convert to torch tensor, match shape, move to correct device
             library_size = torch.tensor(lib, dtype=torch.float32, device=z.device).unsqueeze(1)
@@ -154,10 +167,6 @@ class NB_Autoencoder(nn.Module):
         mu = gene_probs * library_size  # scale by library size
         #theta = torch.exp(self.log_theta).unsqueeze(0).expand_as(mu)
         return {"mu": mu, "theta": self.theta}
-
-    
-
-
    
 
     def loss_function(self, x, outputs):
