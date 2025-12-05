@@ -172,23 +172,21 @@ class NeuralVectorField(nn.Module):
     def __init__(self, latent_dim, hidden_dim=256, n_resblocks=5, time_embed_dim=64):
         super().__init__()
         self.x_proj = nn.Linear(latent_dim, hidden_dim)
-        self.z_proj = nn.Linear(latent_dim, hidden_dim)
         self.time_embedder = TimeEmbedder(time_embed_dim)
 
         self.resblocks = nn.ModuleList([
-            ResNetBlock(hidden_dim*2 + time_embed_dim, hidden_dim*2) for _ in range(n_resblocks)
+            ResNetBlock(hidden_dim + time_embed_dim, hidden_dim*2) for _ in range(n_resblocks)
         ])
         self.output_layer = nn.Sequential(
-            nn.Linear(hidden_dim*2 + time_embed_dim, hidden_dim),
+            nn.Linear(hidden_dim + time_embed_dim, hidden_dim),
             nn.SiLU(),
             nn.Linear(hidden_dim, latent_dim)
         )
 
-    def forward(self, x, z, t):
+    def forward(self, x, t):
         xh = self.x_proj(x)
-        zh = self.z_proj(z)
         th = self.time_embedder(t)
-        h = torch.cat([xh, zh, th], dim=-1)
+        h = torch.cat([xh, th], dim=-1)
         for block in self.resblocks:
             h = block(h)
         return self.output_layer(h)
@@ -202,8 +200,8 @@ class LearnedVectorFieldODE():
     def __init__(self, vf_model):
         self.vf_model = vf_model
 
-    def drift_coefficient(self, x: torch.Tensor, t: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+    def drift_coefficient(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         # x, z: (batch_size, latent_dim)
         # t: (batch_size, 1)
-        return self.vf_model(x, z, t)
+        return self.vf_model(x, t)
 
