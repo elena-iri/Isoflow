@@ -1,14 +1,20 @@
 # Ignore PyTorch checkpoints
 *.pt
-# Ignore in sub folders
 notebooks/evaluation/*.pt
-notebooks/evaluation/*.h5ad
 
 # Ignore generated data
 *.h5ad
+notebooks/evaluation/*.h5ad
+
+# Ignore notebook checkpoints
+.ipynb_checkpoints/
+notebooks/evaluation/.ipynb_checkpoints/
+notebooks/training/.ipynb_checkpoints/
 
 # Ignore figures folder
 figures/
+notebooks/evaluation/figures
 
 # Ignore Python cache
 __pycache__/
+utils/__pycache__/
