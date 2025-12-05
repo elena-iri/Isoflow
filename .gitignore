@@ -1,5 +1,8 @@
 # Ignore PyTorch checkpoints
 *.pt
+# Ignore in sub folders
+notebooks/evaluation/*.pt
+notebooks/evaluation/*.h5ad
 
 # Ignore generated data
 *.h5ad
