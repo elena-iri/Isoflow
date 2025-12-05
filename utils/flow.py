@@ -8,7 +8,7 @@
 
 # - Loading libraries
 
-from abc import ABC, abstractmethod
+#from abc import ABC, abstractmethod
 from typing import Optional #, List, Type, Tuple, Dict
 import math
 import anndata as ad
@@ -121,31 +121,6 @@ class GaussianConditionalProbabilityPath():
         return (z * alpha_t - x) / beta_t ** 2
 
 
-# - Solver for sampling
-
-class ODEFunc(nn.Module):
-    def __init__(self, vf_model, z):
-        super().__init__()
-        self.vf_model = vf_model
-        self.z = z # fixed conditioning 
-
-    def forward(self, t, x): 
-        batch_size = x.shape[0] 
-     
-        # Expand conditioning z to match batch 
-        if self.z.shape[0] == 1: 
-            z = self.z.expand(batch_size, -1) 
-        else: 
-            z = self.z 
-     
-        # Expand t to batch dimension for concatenation 
-        if t.dim() == 0: 
-            t_batch = t.expand(batch_size, 1)  # (batch, 1) 
-        else: 
-            t_batch = t.view(batch_size, -1)   # (batch, 1) if 1D 
-     
-        return self.vf_model(x, z, t_batch) 
-      
 
 # - **Time** embedder
 
